@@ -1,0 +1,94 @@
+{
+  "name": "vscode-wsfs",
+  "displayName": "WebSocketFS - a web socket based file system provider",
+  "version": "0.0.1",
+  "private": true,
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onFileSystem:wsfs"
+  ],
+  "main": "./out/src/extension",
+  "contributes": {
+    "commands": [
+      {
+        "command": "wsfs.workspaceInit",
+        "title": "Setup Workspace",
+        "category": "WebSocketFS"
+      },
+      {
+        "command": "wsfs.init",
+        "title": "Create Files",
+        "category": "WebSocketFS"
+      },
+      {
+        "command": "wsfs.reset",
+        "title": "Delete Files",
+        "category": "WebSocketFS"
+      },
+      {
+        "command": "wsfs.deleteFile",
+        "title": "Delete \"file.txt\"",
+        "category": "WebSocketFS"
+      },
+      {
+        "command": "wsfs.addFile",
+        "title": "Add \"file.txt\"",
+        "category": "WebSocketFS"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "wsfs.init",
+          "when": "workbenchState == workspace"
+        },
+        {
+          "command": "wsfs.reset",
+          "when": "workbenchState == workspace"
+        },
+        {
+          "command": "wsfs.deleteFile",
+          "when": "workbenchState == workspace"
+        },
+        {
+          "command": "wsfs.addFile",
+          "when": "workbenchState == workspace"
+        },
+        {
+          "command": "wsfs.workspaceInit",
+          "when": "workbenchState != workspace"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "lint": "eslint \"**/*.ts\"",
+    "watch": "tsc -watch -p ./",
+    "package": "npx vsce package"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.16.0",
+    "@stylistic/eslint-plugin": "^2.9.0",
+    "@types/node": "^20",
+    "@types/vscode": "^1.73.0",
+    "@types/ws": "^8.5.13",
+    "eslint": "^9.16.0",
+    "globals": "^15.13.0",
+    "prettier": "^3.4.1",
+    "typescript": "^5.6.2",
+    "typescript-eslint": "^8.17.0"
+  },
+  "dependencies": {
+    "path": "^0.12.7",
+    "uuid": "^11.0.3",
+    "ws": "^8.18.0",
+    "zod": "^3.23.8"
+  }
+}
