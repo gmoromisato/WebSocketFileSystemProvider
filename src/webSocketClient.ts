@@ -7,6 +7,7 @@ import * as Responses from "./fileSystemProtocol/responses"
 import { messageFromWebSocketMessage, sendMessage } from "./messageHelpers"
 import { createDeferred, Deferred } from "./util/deferred"
 import { MessageType, ResponseMessage, responseMessageSchema } from "./wireProtocol"
+import { formatErrors } from "./util/zodErrors"
 
 /**
  * Represents a client for interacting with a WebSocket-based file system provider.
@@ -162,8 +163,9 @@ export function createWebSocketClient(address: string | URL, options?: ClientOpt
     const result = await deferred.promise.then(jsonObjectAndBinary => {
       const parseResult = schema.safeParse(jsonObjectAndBinary)
       if (!parseResult.success) {
-        console.error(`Failed to parse ${options.command} response`, options, jsonObjectAndBinary)
-        throw new Error(parseResult.error.errors.map(e => e.message).join("\n"))
+        const errMsg = formatErrors(parseResult.error)
+        console.error(`Failed to parse ${options.command} response`, options, jsonObjectAndBinary, errMsg)
+        throw new Error(errMsg)
       }
       return parseResult.data
     })
