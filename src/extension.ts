@@ -4,6 +4,7 @@ import { WebSocketFS } from "./fileSystemProvider"
 export function deactivate() {
   console.log(`WebSocketFS says "Goodbye"`)
 }
+
 export function activate(context: vscode.ExtensionContext) {
   console.log('WebSocketFS says "Hello"')
 
@@ -143,12 +144,68 @@ export function activate(context: vscode.ExtensionContext) {
     }),
   )
 
+  const { secrets } = context;                 // SecretStorage helper
+  
   context.subscriptions.push(
-    vscode.commands.registerCommand("wsfs.workspaceInit", () => {
-      vscode.workspace.updateWorkspaceFolders(0, 0, {
-        uri: vscode.Uri.parse("wsfs:/"),
-        name: "WebSocketFS - Sample",
-      })
+    vscode.commands.registerCommand("wsfs.workspaceInit", async () => {
+
+      //------------------------------------------------------------------
+      // 1. Ask the user for the connection parameters once
+      //------------------------------------------------------------------
+      /*
+      const server = await vscode.window.showInputBox({
+        prompt: 'GridWhale server (host:port or leave blank for default)',
+        value: 'localhost:443',
+        ignoreFocusOut: true,
+      });
+      if (server === undefined) return;            // Esc pressed → abort
+      */
+      const server = "dev.gridwhale.io"
+
+      const user = await vscode.window.showInputBox({
+        prompt: 'GridWhale username',
+        ignoreFocusOut: true,
+      });
+      if (user === undefined) return;
+
+      const pass = await vscode.window.showInputBox({
+        prompt: 'Password',
+        password: true,
+        ignoreFocusOut: true,
+      });
+      if (pass === undefined) return;
+
+      //------------------------------------------------------------------
+      // 2. Persist the secret (VS Code encrypts it for us)
+      //------------------------------------------------------------------
+      const key = `gw:${server}`;                  // one key per server
+      await secrets.store(key, JSON.stringify({ user, pass }));
+
+      //------------------------------------------------------------------
+      // 3. Add or replace the workspace folder that points at this server
+      //------------------------------------------------------------------
+      const wsUri = vscode.Uri.parse(`wsfs://${server}/`);
+      const existing = vscode.workspace.workspaceFolders
+        ?.find(f => f.uri.toString() === wsUri.toString());
+
+      if (existing) {
+        // Replace in-place so Explorer refreshes
+        const idx = existing.index;
+        vscode.workspace.updateWorkspaceFolders(idx, 1, {
+          uri: wsUri,
+          name: `WebSocketFS (${server})`,
+        });
+      } else {
+        // First-time connection
+        vscode.workspace.updateWorkspaceFolders(0, 0, {
+          uri: wsUri,
+          name: `WebSocketFS (${server})`,
+        });
+      }
+
+      vscode.window.showInformationMessage(
+        `Connected to GridWhale at ${server} as ${user}`);
+
     }),
   )
 }
