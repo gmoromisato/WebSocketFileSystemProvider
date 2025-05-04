@@ -1,82 +1,126 @@
 import * as path from "path"
 import * as vscode from "vscode"
-import { createWebSocketClient } from "./webSocketClient"
+import { createWebSocketClient, WebSocketClient } from "./webSocketClient"
 import { runExampleServer } from "./exampleServer"
 
-export class WebSocketFS implements vscode.FileSystemProvider {
-//  client = createWebSocketClient("ws://localhost:6666")
-  client = createWebSocketClient("wss://dev.gridwhale.io/ws/RCWPLD85")
+export type Credentials = {
+  user: string;
+  pass: string;
+}
 
-  constructor() {
-    runExampleServer({ host: "localhost", port: 6666 })
+type GridWhaleError =
+  | "FileNotFound"
+  | "NoPermissions"
+  | "FileExists"
+  | "Unauthorized"
+  | 401;
+
+export class WebSocketFS implements vscode.FileSystemProvider {
+  readonly onDidChangeFile: vscode.Event<vscode.FileChangeEvent[]>;
+
+  private readonly client: Promise<WebSocketClient>; // lazily resolved
+//  private _fireSoonHandle: NodeJS.Timeout | undefined;
+
+  constructor(
+    private readonly secrets: vscode.SecretStorage,
+    private readonly authority: string,
+    { devServer = false }: { devServer?: boolean } = {},
+  ) {
+    this.onDidChangeFile = this._emitter.event;
+
+    if (devServer) {
+      runExampleServer({ host: "localhost", port: 6666 });
+    }
+
+    // Kick off the async WebSocket creation (includes credential lookup).
+    this.client = this.createClient();
   }
 
+  // ---------------------------------------------------------------------------
+  // File operations
+  // ---------------------------------------------------------------------------
+
   async stat(uri: vscode.Uri): Promise<vscode.FileStat> {
-    return this.client.status(uri.path).then(({ messageJson }) => {
-      return messageJson.success ? messageJson.result : throwExceptionForErrorCode(messageJson.error, uri)
-    })
+    const client = await this.client;
+    const { messageJson } = await client.status(uri.path);
+    return messageJson.success
+      ? messageJson.result
+      : this.throwFor(messageJson.error as GridWhaleError, uri);
   }
 
   async readDirectory(uri: vscode.Uri): Promise<[string, vscode.FileType][]> {
-    return this.client
-      .readDirectory(uri.path)
-      .then(({ messageJson }) => (messageJson.success ? messageJson.result : throwExceptionForErrorCode(messageJson.error, uri)))
+    const client = await this.client;
+    const { messageJson } = await client.readDirectory(uri.path);
+    return messageJson.success
+      ? messageJson.result
+      : this.throwFor(messageJson.error as GridWhaleError, uri);
   }
 
   async readFile(uri: vscode.Uri): Promise<Uint8Array> {
-    return this.client.readFile(uri.path).then(response => {
-      return response.messageBinary ? response.messageBinary : throwExceptionForErrorCode(response.messageJson.error, uri)
-    })
+    const client = await this.client;
+    const { messageBinary, messageJson } = await client.readFile(uri.path);
+    return messageBinary ?? this.throwFor(messageJson.error as GridWhaleError, uri);
   }
 
-  async writeFile(uri: vscode.Uri, content: Uint8Array, { create, overwrite }: { create: boolean; overwrite: boolean }): Promise<void> {
-    const { messageJson } = await this.client.writeFile(uri.path, create, overwrite, content)
+  async writeFile(
+    uri: vscode.Uri,
+    content: Uint8Array,
+    { create, overwrite }: { create: boolean; overwrite: boolean },
+  ): Promise<void> {
+    const client = await this.client;
+    const { messageJson } = await client.writeFile(uri.path, create, overwrite, content);
+
     if (!messageJson.success) {
-      throwExceptionForErrorCode(messageJson.error, uri)
+      this.throwFor(messageJson.error as GridWhaleError, uri);
     }
+
     if (messageJson.created) {
-      this._fireSoon({ type: vscode.FileChangeType.Created, uri })
+      this._fireSoon({ type: vscode.FileChangeType.Created, uri });
     }
-    this._fireSoon({ type: vscode.FileChangeType.Changed, uri })
+    this._fireSoon({ type: vscode.FileChangeType.Changed, uri });
   }
 
   // --- manage files/folders
 
-  async rename(oldUri: vscode.Uri, newUri: vscode.Uri, options: { overwrite: boolean }): Promise<void> {
-    const result = await this.client.rename(oldUri.path, newUri.path, options.overwrite)
-    if (!result.messageJson.success) {
-      throwExceptionForErrorCode(result.messageJson.error, oldUri)
+  async rename(
+    oldUri: vscode.Uri,
+    newUri: vscode.Uri,
+    { overwrite }: { overwrite: boolean },
+  ): Promise<void> {
+    const client = await this.client;
+    const { messageJson } = await client.rename(oldUri.path, newUri.path, overwrite);
+
+    if (!messageJson.success) {
+      this.throwFor(messageJson.error as GridWhaleError, oldUri);
     }
 
-    this._fireSoon({ type: vscode.FileChangeType.Deleted, uri: oldUri }, { type: vscode.FileChangeType.Created, uri: newUri })
+    this._fireSoon(
+      { type: vscode.FileChangeType.Deleted, uri: oldUri },
+      { type: vscode.FileChangeType.Created, uri: newUri },
+    );
   }
 
   async delete(uri: vscode.Uri): Promise<void> {
-    const { messageJson } = await this.client.delete(uri.path)
+    const client = await this.client;
+    const { messageJson } = await client.delete(uri.path);
     if (!messageJson.success) {
-      throwExceptionForErrorCode(messageJson.error, uri)
+      this.throwFor(messageJson.error as GridWhaleError, uri);
     }
   }
 
   async createDirectory(uri: vscode.Uri): Promise<void> {
-    // console.log(`createDirectory: ${uri}`);
-    const { messageJson } = await this.client.createDirectory(uri.path)
+    const client = await this.client;
+    const { messageJson } = await client.createDirectory(uri.path);
+
     if (!messageJson.success) {
-      throwExceptionForErrorCode(messageJson.error, uri)
+      this.throwFor(messageJson.error as GridWhaleError, uri);
     }
 
+    const parent = uri.with({ path: path.posix.dirname(uri.path) });
     this._fireSoon(
-      {
-        type: vscode.FileChangeType.Changed,
-        uri: uri.with({ path: path.posix.dirname(uri.path) }),
-      },
+      { type: vscode.FileChangeType.Changed, uri: parent },
       { type: vscode.FileChangeType.Created, uri },
-    )
-    console.log(
-      `createDirectory: SUCCESS - changed ${uri.with({
-        path: path.posix.dirname(uri.path),
-      })}`,
-    )
+    );
   }
 
   // --- lookup
@@ -87,11 +131,33 @@ export class WebSocketFS implements vscode.FileSystemProvider {
   private readonly _bufferedEvents: vscode.FileChangeEvent[] = []
   private _fireSoonHandle?: NodeJS.Timeout
 
-  readonly onDidChangeFile: vscode.Event<vscode.FileChangeEvent[]> = this._emitter.event
-
   watch(/*_resource: vscode.Uri*/): vscode.Disposable {
     // ignore, fires for all changes...
     return new vscode.Disposable(() => {})
+  }
+
+// ---------------------------------------------------------------------------
+  // Private helpers
+  // ---------------------------------------------------------------------------
+
+  private async credentials(): Promise<Credentials> {
+    const raw = await this.secrets.get(`gw:${this.authority}`);
+    if (!raw) throw vscode.FileSystemError.NoPermissions("Not signed in");
+
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-return
+    return JSON.parse(raw);
+    }
+
+  private async authHeader(): Promise<Record<string, string>> {
+    const { user, pass } = await this.credentials();
+    const token = Buffer.from(`${user}:${pass}`, "utf8").toString("base64");
+    return { Authorization: `Basic ${token}` };
+  }
+
+  private async createClient(): Promise<WebSocketClient> {
+    const headers = await this.authHeader();
+    // `ws` expects `OutgoingHttpHeaders`; our Record<string,string> fits.
+    return createWebSocketClient(`wss://${this.authority}/ws/RCWPLD85`, { headers });
   }
 
   private _fireSoon(...events: vscode.FileChangeEvent[]): void {
@@ -106,15 +172,20 @@ export class WebSocketFS implements vscode.FileSystemProvider {
       this._bufferedEvents.length = 0
     }, 5)
   }
-}
 
-function throwExceptionForErrorCode(code: "FileNotFound" | "NoPermissions" | "FileExists", uri: vscode.Uri): never {
-  switch (code) {
-    case "FileNotFound":
-      throw vscode.FileSystemError.FileNotFound(uri)
-    case "FileExists":
-      throw vscode.FileSystemError.FileExists(uri)
-    case "NoPermissions":
-      throw vscode.FileSystemError.NoPermissions(uri)
+  private throwFor(code: GridWhaleError, uri: vscode.Uri): never {
+    switch (code) {
+      case "FileNotFound":
+        throw vscode.FileSystemError.FileNotFound(uri);
+      case "FileExists":
+        throw vscode.FileSystemError.FileExists(uri);
+      case "NoPermissions":
+      case "Unauthorized":
+      case 401:
+        throw vscode.FileSystemError.NoPermissions(uri);
+      default:
+        throw vscode.FileSystemError.Unavailable(uri);
+    }
   }
 }
+

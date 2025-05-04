@@ -6,9 +6,13 @@ export function deactivate() {
 }
 
 export function activate(context: vscode.ExtensionContext) {
+
   console.log('WebSocketFS says "Hello"')
 
-  const websocketFs = new WebSocketFS()
+  const { secrets } = context;                 // SecretStorage helper
+  const defaultServer = "dev.gridwhale.io";
+
+  const websocketFs = new WebSocketFS(secrets, defaultServer);
   context.subscriptions.push(
     vscode.workspace.registerFileSystemProvider("wsfs", websocketFs, {
       isCaseSensitive: true,
@@ -144,8 +148,6 @@ export function activate(context: vscode.ExtensionContext) {
     }),
   )
 
-  const { secrets } = context;                 // SecretStorage helper
-  
   context.subscriptions.push(
     vscode.commands.registerCommand("wsfs.workspaceInit", async () => {
 
@@ -160,7 +162,7 @@ export function activate(context: vscode.ExtensionContext) {
       });
       if (server === undefined) return;            // Esc pressed → abort
       */
-      const server = "dev.gridwhale.io"
+      const server = defaultServer;
 
       const user = await vscode.window.showInputBox({
         prompt: 'GridWhale username',
