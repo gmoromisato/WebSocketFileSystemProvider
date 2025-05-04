@@ -4,7 +4,8 @@ import { createWebSocketClient } from "./webSocketClient"
 import { runExampleServer } from "./exampleServer"
 
 export class WebSocketFS implements vscode.FileSystemProvider {
-  client = createWebSocketClient("ws://localhost:6666")
+//  client = createWebSocketClient("ws://localhost:6666")
+  client = createWebSocketClient("wss://dev.gridwhale.io/ws/RCWPLD85")
 
   constructor() {
     runExampleServer({ host: "localhost", port: 6666 })
